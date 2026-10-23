@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net46</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AssemblyName>Brante.Gamepad</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Version>1.1.0</Version>
+  </PropertyGroup>
+
+  <!-- Default: compile against the installed game's own assemblies, copied into references/ and loader/ (see README). -->
+  <PropertyGroup Condition="'$(PublicReferences)' != 'true'">
+    <FrameworkPathOverride>$(MSBuildProjectDirectory)/references</FrameworkPathOverride>
+    <NoStdLib>true</NoStdLib>
+    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(PublicReferences)' != 'true'">
+    <Reference Include="references/mscorlib.dll" Private="false" />
+    <Reference Include="references/System.dll" Private="false" />
+    <Reference Include="references/System.Core.dll" Private="false" />
+    <Reference Include="references/UnityEngine.dll" Private="false" />
+    <Reference Include="references/UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="references/UnityEngine.InputModule.dll" Private="false" />
+    <Reference Include="references/UnityEngine.IMGUIModule.dll" Private="false" />
+    <Reference Include="references/UnityEngine.TextRenderingModule.dll" Private="false" />
+    <Reference Include="references/UnityEngine.UIModule.dll" Private="false" />
+    <Reference Include="references/UnityEngine.AudioModule.dll" Private="false" />
+    <Reference Include="references/UnityEngine.UI.dll" Private="false" />
+    <Reference Include="references/Unity.TextMeshPro.dll" Private="false" />
+    <Reference Include="references/Assembly-CSharp-firstpass.dll" Private="false" />
+    <Reference Include="loader/BepInEx/core/BepInEx.dll" Private="false" />
+    <Reference Include="loader/BepInEx/core/0Harmony.dll" Private="false" />
+  </ItemGroup>
+
+  <!-- dotnet build -p:PublicReferences=true: compile against public packages plus the stand-ins in ci/stubs, so no
+       game files are needed (used by the GitHub workflows). The result references the same assemblies, types and
+       members as the default build. -->
+  <ItemGroup Condition="'$(PublicReferences)' == 'true'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" PrivateAssets="all" />
+    <PackageReference Include="UnityEngine.Modules" Version="2018.3.0" PrivateAssets="all" />
+    <PackageDownload Include="Unity3D.UnityEngine.UI" Version="[2018.3.5.1]" />
+    <Reference Include="UnityEngine.UI" Private="false">
+      <HintPath>$(NuGetPackageRoot)unity3d.unityengine.ui/2018.3.5.1/lib/UnityEngine.UI.dll</HintPath>
+    </Reference>
+    <ProjectReference Include="ci/stubs/Unity.TextMeshPro/Unity.TextMeshPro.csproj" Private="false" />
+    <ProjectReference Include="ci/stubs/Assembly-CSharp-firstpass/Assembly-CSharp-firstpass.csproj" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="src/**/*.cs" />
+  </ItemGroup>
+
+  <!-- Single source of the plugin version: the Version property above (override with -p:Version=x.y.z). -->
+  <Target Name="GenerateBuildInfo" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <BuildInfoFile>$(IntermediateOutputPath)BuildInfo.g.cs</BuildInfoFile>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(BuildInfoFile)" Lines="namespace Brante.Gamepad { internal static class BuildInfo { public const string Version = &quot;$(Version)&quot;%3B } }" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(BuildInfoFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

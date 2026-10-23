@@ -1,0 +1,10 @@
+references/
+decompiled/
+loader/
+bin/
+obj/
+checks/bin/
+checks/obj/
+dist/
+release/
+__pycache__/
