@@ -37,6 +37,7 @@ namespace Brante.Gamepad
 
         internal bool Available { get { return api >= 0 && api <= 2; } }
         internal int Index { get { return controller; } }
+        internal int Count { get; private set; }
 
         private uint GetState(uint index, out RawPad pad)
         {
@@ -79,12 +80,14 @@ namespace Brante.Gamepad
         internal bool Read(float deadzone, out PadState state)
         {
             state = default(PadState);
+            Count = 0;
             int fallback = -1;
             PadState fallbackState = default(PadState);
             for (uint i = 0; i < 4; i++)
             {
                 RawPad raw;
                 if (GetState(i, out raw) != 0) continue;
+                Count++;
                 PadState candidate = Convert(raw);
                 if (fallback < 0 || i == controller) { fallback = (int)i; fallbackState = candidate; }
                 if (candidate.buttons != 0 || Math.Abs((int)candidate.lx) > deadzone * 32768 ||

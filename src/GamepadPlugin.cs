@@ -14,8 +14,8 @@ namespace Brante.Gamepad
         private const float ProbeInterval = 0.1f;
 
         private ConfigEntry<float> deadzone, cursorSpeed, scrollSpeed, pointerCurve, precisionFactor, boostFactor, hintScale, clickVolume;
-        private ConfigEntry<bool> showHints, diagnostics, wrapNavigation, focusRing, rumble, clickSound, welcomed, skipIntro, skipLogos, skipLoadingWait;
-        private ConfigEntry<string> backend;
+        private ConfigEntry<bool> showHints, diagnostics, wrapNavigation, focusRing, pauseOnKeyboardMouse, rumble, clickSound, welcomed, skipIntro, skipLogos, skipLoadingWait;
+        private ConfigEntry<string> backend, rightStick;
         private Bindings bindings;
         private IInputSink sink;
         private DirectSink directSink;
@@ -39,6 +39,9 @@ namespace Brante.Gamepad
         private HintContext hintContext;
         private bool hintsDirty = true;
         private bool splashLogged, loadingPatched;
+        private float nextAxisLog;
+        private readonly InputMode inputMode = new InputMode();
+        private Vector2 lastMouse;
         private static int loadingWaitsRemoved;
 
         private void Awake()
@@ -77,9 +80,13 @@ namespace Brante.Gamepad
                 new ConfigDescription("Pointer and scroll speed multiplier while the Precision button is held.", new AcceptableValueRange<float>(0.05f, 1f)));
             boostFactor = Config.Bind("Controller", "BoostFactor", 2f,
                 new ConfigDescription("Pointer and scroll speed multiplier while the Boost button is held.", new AcceptableValueRange<float>(1f, 5f)));
+            rightStick = Config.Bind("Controller", "RightStick", "Scroll",
+                new ConfigDescription("What the right stick does. Scroll: scroll under the pointer. Off: ignore it.", new AcceptableValueList<string>("Scroll", "Off")));
             backend = Config.Bind("Input", "Backend", "Win32",
                 new ConfigDescription("Win32 sends operating-system input (the default, tested under Proton). Direct delivers clicks, scrolling and keys inside the game process; falls back to Win32 if it cannot be installed.",
                     new AcceptableValueList<string>("Win32", "Direct")));
+            pauseOnKeyboardMouse = Config.Bind("Input", "PauseOnKeyboardMouse", true,
+                "Ignore the controller while a keyboard or mouse is being used; any controller button or stick movement switches back.");
             wrapNavigation = Config.Bind("Navigation", "Wrap", false, "At the last control in a direction, jump to the opposite edge.");
             showHints = Config.Bind("Display", "ShowHints", true, "Show controller controls; toggle with the ToggleHints button.");
             focusRing = Config.Bind("Display", "FocusRing", true, "Softly highlight the control under the pointer while using the controller.");
@@ -113,8 +120,10 @@ namespace Brante.Gamepad
                 MenuItem.Number("Pointer curve", 1f, 3f, 0.1f, () => pointerCurve.Value, v => pointerCurve.Value = v),
                 MenuItem.Number("Precision speed (hold)", 0.05f, 1f, 0.05f, () => precisionFactor.Value, v => precisionFactor.Value = v),
                 MenuItem.Number("Boost speed (hold)", 1f, 5f, 0.25f, () => boostFactor.Value, v => boostFactor.Value = v),
+                MenuItem.Choice("Right stick", new[] { "Scroll", "Off" }, () => rightStick.Value == "Off" ? 1 : 0, v => rightStick.Value = v == 1 ? "Off" : "Scroll"),
                 MenuItem.Number("Scroll speed", 1f, 30f, 1f, () => scrollSpeed.Value, v => scrollSpeed.Value = v),
                 MenuItem.Number("Stick deadzone", 0.05f, 0.9f, 0.01f, () => deadzone.Value, v => deadzone.Value = v),
+                MenuItem.Toggle("Pause pad on keyboard/mouse", () => pauseOnKeyboardMouse.Value, v => pauseOnKeyboardMouse.Value = v),
                 MenuItem.Toggle("Wrap navigation", () => wrapNavigation.Value, v => wrapNavigation.Value = v),
                 MenuItem.Toggle("Rumble on click", () => rumble.Value, v => rumble.Value = v),
                 MenuItem.Toggle("Click sound", () => clickSound.Value, v => clickSound.Value = v),
@@ -279,6 +288,10 @@ namespace Brante.Gamepad
             feedback.Volume = clickVolume.Value;
             feedback.Tick(now);
 
+            Vector2 mouse = Input.mousePosition;
+            bool mouseMoved = (mouse - lastMouse).sqrMagnitude > 4f;
+            lastMouse = mouse;
+
             PadState pad;
             bool found = reader.Read(deadzone.Value, out pad);
             if (found != connected)
@@ -305,6 +318,31 @@ namespace Brante.Gamepad
             if (!primed) { previous = pad.buttons; primed = true; return; }
 
             Buttons pressed = pad.buttons & ~previous;
+            if (!pauseOnKeyboardMouse.Value) inputMode.ControllerUsed();
+            else
+            {
+                if (!keyboard.IsOpen && !menu.IsOpen &&
+                    inputMode.Observe(now, mouseMoved, MouseClicked(), KeyboardKeyPressed()))
+                {
+                    sink.ReleaseAll();
+                    active = false;
+                    Trace("Keyboard or mouse in use: controller paused");
+                }
+                if (inputMode.KeyboardMouse)
+                {
+                    float limit = deadzone.Value * 32768;
+                    bool padUsed = pressed != 0 || Math.Abs((int)pad.lx) > limit || Math.Abs((int)pad.ly) > limit || Math.Abs((int)pad.ry) > limit;
+                    if (padUsed)
+                    {
+                        inputMode.ControllerUsed();
+                        active = true;
+                        hintsDirty = true;
+                        Trace("Controller in use again");
+                    }
+                    previous = pad.buttons; // the input that wakes the controller is not acted on
+                    return;
+                }
+            }
             if ((pressed & bindings.ToggleHints) != 0) { showHints.Value = !showHints.Value; Config.Save(); }
             if (keyboard.IsOpen)
             {
@@ -329,7 +367,12 @@ namespace Brante.Gamepad
 
             float x = PadMath.Curve(PadMath.Axis(pad.lx, deadzone.Value), pointerCurve.Value);
             float y = PadMath.Curve(PadMath.Axis(pad.ly, deadzone.Value), pointerCurve.Value);
-            float scroll = PadMath.Axis(pad.ry, deadzone.Value);
+            float scroll = rightStick.Value == "Scroll" ? PadMath.Axis(pad.ry, deadzone.Value) : 0f;
+            if (diagnostics.Value && now >= nextAxisLog && (x != 0 || y != 0 || scroll != 0 || Math.Abs((int)pad.rx) > deadzone.Value * 32768))
+            {
+                nextAxisLog = now + 0.5f;
+                Logger.LogInfo("Axes pad=" + reader.Index + " of " + reader.Count + " lx=" + pad.lx + " ly=" + pad.ly + " rx=" + pad.rx + " ry=" + pad.ry);
+            }
             if (pressed != 0 || x != 0 || y != 0 || scroll != 0)
             {
                 if (!active) hintsDirty = true;
@@ -348,7 +391,10 @@ namespace Brante.Gamepad
             if (Cursor.lockState != CursorLockMode.Locked)
             {
                 if (x != 0 || y != 0)
+                {
                     OsCursor.MoveTo(window, (Vector2)Input.mousePosition + new Vector2(x, y) * cursorSpeed.Value * speed * Time.unscaledDeltaTime);
+                    inputMode.Own(now);
+                }
                 int wanted = (pad.buttons & Buttons.DPadUp) != 0 ? 1 : (pad.buttons & Buttons.DPadDown) != 0 ? 2 :
                     (pad.buttons & Buttons.DPadLeft) != 0 ? 3 : (pad.buttons & Buttons.DPadRight) != 0 ? 4 : 0;
                 if (wanted != 0 && (wanted != direction || now >= nextRepeat))
@@ -366,6 +412,7 @@ namespace Brante.Gamepad
                 if ((pressed & bindings.Click) != 0 && !OpenKeyboardAtPointer())
                 {
                     if (sink.MouseDown()) feedback.Click(now);
+                    inputMode.Own(now);
                     Trace("Click down at " + Input.mousePosition);
                 }
                 if ((pad.buttons & bindings.Click) == 0 && sink.MouseHeld) { sink.MouseUp(); Trace("Click up"); }
@@ -376,9 +423,23 @@ namespace Brante.Gamepad
             if ((pressed & bindings.PagePrevious) != 0) sink.Key(PadKey.Left, now);
             if ((pressed & bindings.PageNext) != 0) sink.Key(PadKey.Right, now);
             if ((pressed & bindings.Keyboard) != 0) OpenKeyboardAtPointer();
+            if (pressed != 0) inputMode.Own(now); // any press may have produced a key or click of ours
             previous = pad.buttons;
 
             if (active && now >= nextProbe) RefreshProbe(now);
+        }
+
+        private static bool MouseClicked()
+        {
+            return Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2);
+        }
+
+        // Keyboard key codes only (8..319); mouse buttons and the game controller's buttons come after them.
+        private static bool KeyboardKeyPressed()
+        {
+            for (int code = 8; code <= 319; code++)
+                if (Input.GetKeyDown((KeyCode)code)) return true;
+            return false;
         }
 
         private void Navigate(IntPtr window, int x, int y)
@@ -387,6 +448,7 @@ namespace Brante.Gamepad
             string name;
             if (!scanner.Move(Input.mousePosition, x, y, wrapNavigation.Value, out destination, out name)) return;
             OsCursor.MoveTo(window, destination);
+            inputMode.Own(Time.unscaledTime);
             nextProbe = 0f;
             Trace("Focus " + name + " at " + destination);
         }

@@ -36,6 +36,7 @@ internal static class Program
         VirtualKeyChecks();
         HintChecks();
         MenuChecks();
+        InputModeChecks();
         if (failures > 0)
         {
             Console.Error.WriteLine(failures + " of " + count + " checks failed.");
@@ -283,6 +284,22 @@ internal static class Program
         long_.Index = 19;
         Check(long_.FirstVisible(6) == 14, "last rows stay visible");
         Check(HintText.MenuHelp(Bindings.Parse(DefaultFor, null)).Contains("B/Start: close"), "menu help text");
+    }
+
+    private static void InputModeChecks()
+    {
+        InputMode mode = new InputMode();
+        Check(!mode.KeyboardMouse, "starts in controller mode");
+        Check(!mode.Observe(1f, false, false, false), "no input changes nothing");
+        mode.Own(1f);
+        Check(!mode.Observe(1.1f, true, true, true) && !mode.KeyboardMouse, "input right after the plugin's own action is ignored");
+        Check(mode.Observe(1f + InputMode.Grace + 0.01f, true, false, false) && mode.KeyboardMouse, "mouse movement after the grace period switches mode");
+        Check(!mode.Observe(5f, true, true, true), "already in keyboard/mouse mode");
+        Check(mode.ControllerUsed() && !mode.KeyboardMouse, "controller input switches back");
+        Check(!mode.ControllerUsed(), "no change when already in controller mode");
+        Check(mode.Observe(6f, false, true, false), "a click switches mode");
+        mode.ControllerUsed();
+        Check(mode.Observe(7f, false, false, true), "a key press switches mode");
     }
 
     private static void HintChecks()

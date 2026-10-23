@@ -70,6 +70,7 @@ Deadzone = 0.22
 CursorSpeed = 900
 ScrollSpeed = 8
 PointerCurve = 1
+RightStick = Scroll
 PrecisionFactor = 0.3
 BoostFactor = 2
 
@@ -92,6 +93,7 @@ SkipIntro = false
 
 [Input]
 Backend = Win32
+PauseOnKeyboardMouse = true
 
 [Navigation]
 Wrap = false
@@ -110,12 +112,13 @@ ClickVolume = 0.25
 LogActions = false
 ```
 
-- `Deadzone`: raise it if the stick drifts. `CursorSpeed` is pixels per second. `ScrollSpeed` is scroll notches per second at full deflection. `PointerCurve` above 1 gives finer control near the stick center.
+- `Deadzone`: raise it if the stick drifts. `CursorSpeed` is pixels per second. `ScrollSpeed` is scroll notches per second at full deflection. `PointerCurve` above 1 gives finer control near the stick center. `RightStick = Off` ignores the right stick entirely. With `LogActions = true` the log records raw stick values (`Axes pad=... lx=... ly=... rx=... ry=...`) while a stick is moved, which helps when a controller maps its axes unexpectedly.
 - `[Buttons]`: names are `A B X Y LB RB LT RT Start Back LS RS`; list several with commas (`Back = B, Start`); `None` disables an action. An unknown name is logged and the default is used. `Back` sends Escape; on the controller keyboard `Back` cancels and `ModMenu` accepts. `ToggleHints = Back` is the XInput Back button (Share/View).
 - `Backend = Win32` sends operating-system mouse and keyboard input. `Backend = Direct` keeps everything inside the game: key presses are answered through `Input.GetKey*`, and clicks, drags and scrolling go through the Unity EventSystem, so nothing is injected into other windows. The pointer position is still the real cursor. If `Direct` cannot be installed the plugin logs a warning and uses Win32. `Direct` is experimental; see [docs/TESTING.md](docs/TESTING.md).
 - `SkipLogos` skips Unity's start-up logo sequence (three logos, two seconds each). Unity 2018.3 times the logos in native code with no skip call, so the plugin finds the "keep waiting" branch in `UnityPlayer.dll` by byte pattern and replaces it with no-ops in memory; the file on disk is never changed. If the pattern is not found exactly once (a different Unity build) nothing is patched and the log says `Startup logo skip unavailable`.
 - `SkipLoadingWait` removes the fixed waits (1 s and 0.5 s) in the game's start-up loading scene (`GamePreparationScript.LoadBootScene`) by rewriting their `WaitForSeconds` arguments to zero. The scene still takes as long as loading really takes. If the coroutine cannot be found the log says `Loading wait removal unavailable`.
 - `SkipIntro` skips the story intro scene (title logo with voice-over) by answering its "any key" check on its first frame. If the intro class cannot be patched, the plugin logs `Intro skip unavailable` and the intro plays as normal.
+- `PauseOnKeyboardMouse` ignores the controller (no pointer, clicks, keys or hints) as soon as the real mouse moves or clicks or a keyboard key is pressed, so a drifting stick or an idle pad cannot fight you. Pressing any controller button or pushing a stick hands control back; that first input is not acted on. Mouse and key input within 0.3 s of the plugin's own actions is not counted. Touchpads and anything else that moves the mouse count as a mouse.
 - `Wrap` makes D-pad navigation jump to the opposite edge when nothing lies ahead.
 - `LogActions` records controller focus, clicks, shortcuts and keyboard state in `BepInEx/LogOutput.log`.
 
